@@ -10,58 +10,93 @@
 
 package usbr.wat.plugins.forecastreport.editors;
 
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.EventQueue;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.event.ActionEvent;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.Vector;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Logger;
 import javax.swing.JButton;
+import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.SwingWorker;
+import javax.swing.event.ListSelectionEvent;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
 import com.rma.io.FileManagerImpl;
+import hec.client.Report;
+import hec.util.AnimatedWaitGlassPane;
 import hec2.wat.model.WatSimulation;
 import rma.swing.ButtonCmdPanel;
 import rma.swing.ButtonCmdPanelListener;
 import rma.swing.RmaInsets;
 import rma.swing.RmaJDialog;
 import rma.swing.RmaJTable;
+import rma.swing.RmaJTextField;
 import rma.swing.tree.LabelIconObject;
+import rma.util.IntVector;
+import rma.util.RMAIO;
 import usbr.wat.plugins.actionpanel.ActionsWindow;
+import usbr.wat.plugins.actionpanel.actions.DisplayReportAction;
+import usbr.wat.plugins.actionpanel.actions.forecast.RunForecastSimulationAction;
+import usbr.wat.plugins.actionpanel.editors.ReportOptionsPanel;
 import usbr.wat.plugins.actionpanel.io.ReportOptions;
 import usbr.wat.plugins.actionpanel.model.ForecastReportingPlugin;
 import usbr.wat.plugins.actionpanel.model.ReportPlugin;
 import usbr.wat.plugins.actionpanel.model.ReportsManager;
 import usbr.wat.plugins.actionpanel.model.SimulationReportInfo;
+import usbr.wat.plugins.actionpanel.model.forecast.EnsembleReportInfo;
 import usbr.wat.plugins.actionpanel.model.forecast.EnsembleSet;
 import usbr.wat.plugins.actionpanel.model.forecast.ForecastSimGroup;
 import usbr.wat.plugins.actionpanel.ui.UsbrPanel;
 
 
 import static rma.swing.ButtonCmdPanel.CANCEL_BUTTON;
+import static rma.swing.ButtonCmdPanel.CLOSE_BUTTON;
 import static rma.swing.ButtonCmdPanel.OK_BUTTON;
 
 public class DisplayForecastReportsSelector extends RmaJDialog
 {
+	private static final int SELECTION_COL = 0;
+	private static final int ENSEMBLE_SET_COL = 1;
+	private static final int MEMBERS_TO_REPORT_COL = 2;
 	private final ActionsWindow _parent;
 	private final UsbrPanel _parentPanel;
 	private RmaJTable _ensembleTable;
 	private ButtonCmdPanel _cmdPanel;
 	private JButton _selectAllBtn;
 	private JButton _unselectAllBtn;
+	private ReportOptionsPanel _optionsPanel;
+	private RmaJTextField _simulationFld;
+	private List<SimulationReportInfo> _sims;
+	private AnimatedWaitGlassPane _agp;
+	private Component _glassPane;
 
 	public DisplayForecastReportsSelector(ActionsWindow parent, UsbrPanel parentPanel)
 	{
-		super(parent, false);
+		super(parent, true);
 		_parent =parent;
 		_parentPanel = parentPanel;
 		buildControls();
 		addListeners();
 		pack();
-		setSize(500,500);
+		setSize(600,400);
 		setLocationRelativeTo(getParent());
 	}
 
@@ -72,17 +107,40 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		getContentPane().setLayout(new GridBagLayout());
 		setTitle("Select Ensemble Sets to Report on");
 
-		String[] headers = new String[]{"Select", "Simulation","Ensemble Set", "Computed Members", "Members for Report"};
+		JLabel label = new JLabel("Simulation:");
+		GridBagConstraints gbc = new GridBagConstraints();
+		gbc.gridx = GridBagConstraints.RELATIVE;
+		gbc.gridy = GridBagConstraints.RELATIVE;
+		gbc.gridwidth = 1;
+		gbc.weightx = 0.0;
+		gbc.weighty = 0.0;
+		gbc.anchor = GridBagConstraints.WEST;
+		gbc.fill = GridBagConstraints.NONE;
+		gbc.insets = RmaInsets.INSETS5505;
+		add(label, gbc);
+
+		_simulationFld = new RmaJTextField();
+		_simulationFld.setEditable(false);
+		gbc.gridx = GridBagConstraints.RELATIVE;
+		gbc.gridy = GridBagConstraints.RELATIVE;
+		gbc.gridwidth = GridBagConstraints.REMAINDER;
+		gbc.weightx = 1.0;
+		gbc.weighty = 0.0;
+		gbc.anchor = GridBagConstraints.WEST;
+		gbc.fill = GridBagConstraints.HORIZONTAL;
+		gbc.insets = RmaInsets.INSETS5505;
+		add(_simulationFld, gbc);
+
+		String[] headers = new String[]{"Select", "Ensemble Set",  "Members for Report ", "Computed Members"};
 		_ensembleTable = new RmaJTable(this, headers)
 		{
 			public boolean isCellEditable(int row, int column)
 			{
-				return column == 3;
+				return column == 0 || column == 2;
 			}
 
 		};
-
-		GridBagConstraints gbc = new GridBagConstraints();
+		_ensembleTable.setCheckBoxCellEditor(0);
 		gbc.gridx = GridBagConstraints.RELATIVE;
 		gbc.gridy = GridBagConstraints.RELATIVE;
 		gbc.gridwidth = GridBagConstraints.REMAINDER;
@@ -105,6 +163,8 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		add(buttonPanel, gbc);
 
 		_selectAllBtn = new JButton("Select All");
+		_selectAllBtn.setToolTipText("Select All the Ensemble Members for the selected table rows");
+		_selectAllBtn.setEnabled(false);
 		gbc.gridx = GridBagConstraints.RELATIVE;
 		gbc.gridy = GridBagConstraints.RELATIVE;
 		gbc.gridwidth = 1;
@@ -115,7 +175,9 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		gbc.insets = RmaInsets.INSETS5505;
 		buttonPanel.add(_selectAllBtn, gbc);
 
-		_unselectAllBtn = new JButton("Unselect All");
+		_unselectAllBtn = new JButton("Clear All");
+		_selectAllBtn.setToolTipText("Clear All the Ensemble Members for the selected table rows");
+		_unselectAllBtn.setEnabled(false);
 		gbc.gridx = GridBagConstraints.RELATIVE;
 		gbc.gridy = GridBagConstraints.RELATIVE;
 		gbc.gridwidth = GridBagConstraints.REMAINDER;
@@ -126,7 +188,22 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		gbc.insets = RmaInsets.INSETS5505;
 		buttonPanel.add(_unselectAllBtn, gbc);
 
-		_cmdPanel = new ButtonCmdPanel(ButtonCmdPanel.OK_CANCEL_BUTTONS);
+		_optionsPanel = new ReportOptionsPanel();
+		gbc.gridx = GridBagConstraints.RELATIVE;
+		gbc.gridy = GridBagConstraints.RELATIVE;
+		gbc.gridwidth = GridBagConstraints.REMAINDER;
+		gbc.weightx = 1.0;
+		gbc.weighty = 0.0;
+		gbc.anchor = GridBagConstraints.NORTHWEST;
+		gbc.fill = GridBagConstraints.NONE;
+		gbc.insets = RmaInsets.INSETS5505;
+		add(_optionsPanel, gbc);
+
+
+
+		_cmdPanel = new ButtonCmdPanel(ButtonCmdPanel.OK_BUTTON| CLOSE_BUTTON);
+		JButton okBtn = _cmdPanel.getButton(OK_BUTTON);
+		okBtn.setText("Create Report");
 		gbc.gridx = GridBagConstraints.RELATIVE;
 		gbc.gridy = GridBagConstraints.RELATIVE;
 		gbc.gridwidth = GridBagConstraints.REMAINDER;
@@ -134,12 +211,15 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		gbc.weighty = 0.0;
 		gbc.anchor = GridBagConstraints.NORTHWEST;
 		gbc.fill = GridBagConstraints.HORIZONTAL;
-		gbc.insets = RmaInsets.INSETS5505;
+		gbc.insets = RmaInsets.INSETS5555;
 		add(_cmdPanel, gbc);
 	}
 
 	private void addListeners()
 	{
+		_ensembleTable.getSelectionModel().addListSelectionListener(e->tableRowSelected(e));
+		_selectAllBtn.addActionListener(e->selectAllAction());
+		_unselectAllBtn.addActionListener(e->unselectAllAction());
 		_cmdPanel.addCmdPanelListener(new ButtonCmdPanelListener()
 		{
 			public void buttonCmdActionPerformed(ActionEvent e)
@@ -147,18 +227,56 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 				switch (e.getID())
 				{
 					case OK_BUTTON:
-						if ( createReport())
-						{
-							setVisible(false);
-						}
+						createReport();
 						break;
-					case CANCEL_BUTTON:
+					case CLOSE_BUTTON:
 						setVisible(false);
 						break;
 				}
 			}
 		});
 	}
+
+	private void tableRowSelected(ListSelectionEvent e)
+	{
+		if ( e.getValueIsAdjusting())
+		{
+			return;
+		}
+		int row = _ensembleTable.getSelectedRow();
+		boolean enabled = row > -1;
+
+		_selectAllBtn.setEnabled(enabled);
+		_unselectAllBtn.setEnabled(enabled);
+	}
+
+	private void unselectAllAction()
+	{
+		int[] rows = _ensembleTable.getSelectedRows();
+		if ( rows == null || rows.length == 0 )
+		{
+			return;
+		}
+		for (int r = 0;r < rows.length;r++)
+		{
+			_ensembleTable.setValueAt("", r, 2);
+		}
+	}
+
+	private void selectAllAction()
+	{
+		int[] rows = _ensembleTable.getSelectedRows();
+		if ( rows == null || rows.length == 0 )
+		{
+			return;
+		}
+		for (int r = 0;r < rows.length;r++)
+		{
+			Object obj = _ensembleTable.getValueAt(r, 3);
+			_ensembleTable.setValueAt(obj, r, 2);
+		}
+	}
+
 	public void setVisible(boolean visible)
 	{
 		if ( visible )
@@ -220,20 +338,27 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		ReportPlugin plugin;
 		ForecastSimGroup simGroup = (ForecastSimGroup) _parent.getSimulationGroup();
 		Vector<Object> row;
+		_sims = sims;
 		for(int s = 0;s < sims.size();s++ )
 		{
 			SimulationReportInfo sim = sims.get(s);
 			WatSimulation simulation = sim.getSimulation();
+			_simulationFld.setText(simulation.getName());
 			List<EnsembleSet> esets = simGroup.getEnsembleSets(simulation);
 			for (int e = 0;e < esets.size(); e++ )
 			{
 				row = new Vector<>();
 				row.add(Boolean.FALSE);
 				EnsembleSet eset = esets.get(e);
-				row.add(simulation);
 				row.add(eset);
 				row.add("");
-				row.add(eset.getComputedMembers());
+				IntVector members = eset.getComputedMembers();
+				int[] membersArray = members.toArray();
+				Arrays.sort(membersArray);
+				String str = Arrays.toString(membersArray);
+				str = RMAIO.removeChar(str, ']');
+				str = RMAIO.removeChar(str, '[');
+				row.add(str);
 
 				_ensembleTable.appendRow(row);
 
@@ -243,17 +368,277 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 
 		//updateCreateReportButtonState();
 	}
-	private boolean createReport()
+
+	private List<EnsembleReportInfo> getEnsembleInfos()
 	{
-		List<ReportPlugin> plugins = ReportsManager.getPlugins();
-		for(int i = 0;i < plugins.size(); i++ )
+		int rows = _ensembleTable.getNumRows();
+		Object obj;
+		List<EnsembleReportInfo>eInfoList = new ArrayList<>();
+		for (int r = 0;r < rows; r++ )
 		{
-			if ( plugins.get(i) instanceof ForecastReportingPlugin)
+			obj = _ensembleTable.getValueAt(r, SELECTION_COL);
+			if ( isSelected(obj))
 			{
-				//((ForecastReportingPlugin)plugins.get(i)).createReport(List< SimulationReportInfo > sris, ReportOptions options);
+				int [] memberSet = getMembers((String)_ensembleTable.getValueAt(r, MEMBERS_TO_REPORT_COL));
+				if ( memberSet != null && memberSet.length > 0 )
+				{
+					EnsembleReportInfo eInfo = new EnsembleReportInfo((EnsembleSet)_ensembleTable.getValueAt(r,ENSEMBLE_SET_COL),memberSet);
+					eInfoList.add(eInfo);
+				}
 			}
 		}
+		return eInfoList;
+	}
+
+	private int[] getMembers(String memberSet)
+	{
+		return RunForecastSimulationAction.getIntegerSet(memberSet);
+	}
+
+	private boolean isSelected(Object obj)
+	{
+		return  obj != null && (obj == Boolean.TRUE || RMAIO.parseBoolean(obj.toString(), false));
+	}
+
+	private boolean createReport()
+	{
+		_ensembleTable.commitEdit(true);
+
+		List<ReportPlugin> plugins = ReportsManager.getPlugins();
+		ForecastReportingPlugin plugin = null;
+		for (int i = 0;i < plugins.size(); i++ )
+		{
+			if ( plugins.get(i) instanceof ForecastReportingPlugin )
+			{
+				plugin = (ForecastReportingPlugin) plugins.get(i);
+				break;
+			}
+		}
+		if ( plugin == null )
+		{
+			JOptionPane.showMessageDialog(this, "No Forecast Reporting Plugin found to create report with.", "Missing Plugin", JOptionPane.PLAIN_MESSAGE);
+			return false;
+		}
+		final ForecastReportingPlugin fPlugin = plugin;
+		List<EnsembleReportInfo> ensembleInfos = getEnsembleInfos();
+		if ( ensembleInfos.size() == 0 )
+		{
+			JOptionPane.showMessageDialog(this, "No Ensemble Sets selected to report on, or no members entered.", "Nothing to Report on", JOptionPane.PLAIN_MESSAGE);
+			return false;
+		}
+		_agp = new AnimatedWaitGlassPane();
+		_agp.setTransparency(0.8f);
+		setGlassPane("Creating Reports...");
+		try
+		{
+
+			int maxThreads = 1;
+			ExecutorService threadPool = Executors.newFixedThreadPool(maxThreads);
+
+
+			SwingWorker<Void, ReportCreator> worker = new SwingWorker<Void, ReportCreator>()
+			{
+				private boolean _successful = true;
+				private ReportCreator _failedReport;
+				@Override
+				public Void doInBackground()
+				{
+					Future<ReportCreator> future = createReport(fPlugin, _sims.get(0), ensembleInfos);
+
+
+					List<Future<ReportCreator>>futures = new ArrayList<>();
+
+					if ( future != null )
+					{
+						futures.add(future);
+					}
+
+					ReportCreator rv;
+					for (int i = 0;i < futures.size(); i++ )
+					{
+						try
+						{
+							rv = futures.get(i).get();
+							publish(rv);
+						}
+						catch (InterruptedException | ExecutionException e)
+						{
+							e.printStackTrace();
+						}
+					}
+
+
+					return null;
+				}
+				private Future<ReportCreator> createReport(ForecastReportingPlugin reportPlugin, SimulationReportInfo sris, List<EnsembleReportInfo>esetInfo)
+				{
+					ReportCreator rc = new ReportCreator(reportPlugin, sris, esetInfo);
+					Future<ReportCreator> future = threadPool.submit(rc);
+					return future;
+				}
+				@Override
+				public void process(List<ReportCreator> chunks)
+				{
+					if ( chunks == null || chunks.isEmpty())
+					{
+						return;
+					}
+					ReportCreator rv;
+					for (int i = 0;i < chunks.size(); i++ )
+					{
+						rv = chunks.get(i);
+						if ( rv != null )
+						{
+							if ( !rv.wasReportSuccessFul())
+							{
+								_agp.setMessage("Failed to create report "+rv.getReportPlugin().getName());
+								_successful = false;
+								_failedReport = rv;
+							}
+						}
+						else
+						{
+							_agp.setMessage("Failed to create report ");
+							_successful = false;
+							_failedReport = rv;
+						}
+					}
+				}
+				@Override
+				public void done()
+				{
+					_agp.setMessage("Reports Complete");
+					try
+					{
+						threadPool.awaitTermination(5, TimeUnit.SECONDS);
+					}
+					catch (InterruptedException e)
+					{
+					}
+					try
+					{
+
+					}
+					finally
+					{
+						resetGlassPane();
+					}
+					if ( _successful )
+					{
+						int opt = JOptionPane.showOptionDialog(DisplayForecastReportsSelector.this, "Reports Created Successfully",
+								"Complete",JOptionPane.OK_CANCEL_OPTION,JOptionPane.PLAIN_MESSAGE,
+								null, new Object[] {"Close", "Display Reports"}, "Close");
+						if ( opt == 1 )
+						{
+							DisplayReportAction action = new DisplayReportAction(_parentPanel);
+							action.displayReportAction();
+						}
+					}
+					else
+					{
+						JOptionPane.showMessageDialog(DisplayForecastReportsSelector.this,
+								"Failed to create report for "+_failedReport._reportPlugin.getName(),
+								"Report Failed", JOptionPane.INFORMATION_MESSAGE);
+					}
+				}
+			};
+			worker.execute();
+
+		}
+		catch (Exception e )
+		{
+			Logger.getLogger(DisplayForecastReportsSelector.class.getName()).warning("Exception running reports " + e);
+			resetGlassPane();
+		}
+		finally
+		{
+
+
+		}
+
 		return true;
+	}
+	public void setGlassPane(String msg)
+	{
+		_glassPane = getGlassPane();
+		_agp = new AnimatedWaitGlassPane();
+		_agp.setColor(Color.BLACK);
+		setGlassPane(_agp);
+		_agp.setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+		_agp.setMessage(msg);
+		_agp.setActive(true);
+		_agp.setVisible(true);
+
+	}
+
+	public void resetGlassPane()
+	{
+		if(_agp != null && _glassPane != null)
+		{
+			_agp.setCursor(Cursor.getDefaultCursor());
+			_agp.setActive(false);
+			_agp.setVisible(false);
+			setGlassPane(_glassPane);
+			_agp = null;
+			_glassPane = null;
+		}
+	}
+
+	public class ReportCreator
+			implements Callable
+	{
+
+		private final List<EnsembleReportInfo> _esetInfo;
+		ForecastReportingPlugin _reportPlugin;
+		private boolean _reportRv;
+		private SimulationReportInfo _sris;
+
+		/**
+		 * @param reportPlugin
+		 * @param sris
+		 */
+		public ReportCreator(ForecastReportingPlugin reportPlugin, SimulationReportInfo sris, List<EnsembleReportInfo> esetInfo)
+		{
+			super();
+			_reportPlugin = reportPlugin;
+			_sris = sris;
+			_esetInfo = esetInfo;
+		}
+
+		@Override
+		public Object call() throws Exception
+		{
+			_agp.setMessage("Creating report for "+_reportPlugin.getName());
+
+			ReportOptions options = _optionsPanel.getReportOptions();
+			try
+			{
+				_reportRv = _reportPlugin.createReport(_sris, _esetInfo, options);
+			}
+			catch ( Exception e )
+			{
+				Logger.getLogger(DisplayForecastReportsSelector.class.getName()).info("Failed to run report "+_reportPlugin.getName()
+						+" Error:"+e);
+				e.printStackTrace();
+				_reportRv = false;
+			}
+			return this;
+		}
+
+		public boolean wasReportSuccessFul()
+		{
+			return _reportRv;
+		}
+
+		/**
+		 * @return
+		 */
+		public ReportPlugin getReportPlugin()
+		{
+			return _reportPlugin;
+		}
+
+
 	}
 
 }

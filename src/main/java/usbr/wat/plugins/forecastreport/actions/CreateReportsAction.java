@@ -45,7 +45,7 @@ import usbr.wat.plugins.actionpanel.model.ReportsManager;
 import usbr.wat.plugins.actionpanel.model.SimulationReportInfo;
 import usbr.wat.plugins.actionpanel.ui.UsbrPanel;
 import usbr.wat.plugins.forecastreport.io.ForecastReportXmlFile;
-import usbr.wat.plugins.forecastreport.model.EnsembleReportInfo;
+import usbr.wat.plugins.actionpanel.model.forecast.EnsembleReportInfo;
 
 /**
  * @author Mark Ackerman
@@ -104,6 +104,7 @@ public class CreateReportsAction extends AbstractReportAction
 	 */
 	private String createSimulationXmlFile(List<SimulationReportInfo> sims, List<EnsembleReportInfo> ensembleReportInfos)
 	{
+		_parent = ActionPanelPlugin.getInstance().getActionsWindow();
 		Project prj = Project.getCurrentProject();
 		String studyDir = prj.getProjectDirectory();
 		String simFolder = sims.get(0).getSimFolder();
@@ -118,7 +119,9 @@ public class CreateReportsAction extends AbstractReportAction
 		xmlFile.setStudyInfo(studyDir, getObsDataPath(studyDir));
 		List<SimulationReportInfo>simList = new ArrayList<>();
 		simList.addAll(sims);
-		xmlFile.setSimulationInfo(_parent.getSimulationGroup().getName(), sims);
+		xmlFile.setSimulationInfo(_parent.getForecastPanel().getSimulationGroup().getName(), sims);
+		xmlFile.setSimulationGroup(_parent.getForecastPanel().getSimulationGroup());
+		xmlFile.setEnsembleInfo(ensembleReportInfos);
 		//xmlFile.setEnsembleSetInfo();
 		if (  xmlFile.createXMLFile() )
 		{
@@ -334,5 +337,11 @@ public class CreateReportsAction extends AbstractReportAction
 	public Action getReportAction(ActionsWindow parent, UsbrPanel parentPanel)
 	{
 		return new DisplayEnsembleSelectorAction(parent, parentPanel);
+	}
+
+	@Override
+	public boolean createReport(SimulationReportInfo sims, List<EnsembleReportInfo> ensembleReportInfos, ReportOptions options)
+	{
+		return false;
 	}
 }
