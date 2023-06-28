@@ -49,7 +49,7 @@ public class ForecastReportXmlFile extends ReportXmlFile
 		{
 			esInfo = _ensembleInfos.get(i);
 			Element ensembleElem = new Element(ENSEMBLE_SET);
-			simElem.addContent(ensembleElem);
+			ensemblesElem.addContent(ensembleElem);
 			XMLUtilities.addChildContent(ensembleElem, NAME,esInfo.getEnsembleSet().getName());
 			XMLUtilities.addChildContent(ensembleElem, OPERATIONS_NAMES,esInfo.getEnsembleSet().getBcData().getOpsDataName());
 			XMLUtilities.addChildContent(ensembleElem, MET_NAME,esInfo.getEnsembleSet().getBcData().getMetDataName());
