@@ -16,6 +16,7 @@ import java.util.Date;
 import java.util.List;
 
 import javax.swing.Action;
+import hec2.plugin.model.Simulation;
 import org.python.core.PyCode;
 import org.python.util.PythonInterpreter;
 
@@ -342,6 +343,8 @@ public class CreateReportsAction extends AbstractReportAction
 	@Override
 	public boolean createReport(SimulationReportInfo sims, List<EnsembleReportInfo> ensembleReportInfos, ReportOptions options)
 	{
-		return false;
+		List<SimulationReportInfo>simInfos = new ArrayList<>();
+		simInfos.add(sims);
+		return createReport(simInfos, ensembleReportInfos, options);
 	}
 }
