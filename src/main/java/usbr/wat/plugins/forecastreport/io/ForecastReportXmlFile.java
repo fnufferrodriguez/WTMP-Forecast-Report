@@ -32,6 +32,7 @@ public class ForecastReportXmlFile extends ReportXmlFile
 	private static final String COLLECTIONS_START = "CollectionsStart";
 	private static final String COLLECTIONS_END = "CollectionsEnd";
 	private static final String MEMBERS_TO_REPORT = "MembersToReport";
+	private static final String FORECAST_TYPE = "Forecast";
 	private List<EnsembleReportInfo> _ensembleInfos;
 	private ForecastSimGroup _simulationGroup;
 
@@ -73,5 +74,10 @@ public class ForecastReportXmlFile extends ReportXmlFile
 	public void setSimulationGroup(ForecastSimGroup simulationGroup)
 	{
 		_simulationGroup = simulationGroup;
+	}
+
+	protected String getReportType()
+	{
+		return FORECAST_TYPE;
 	}
 }
