@@ -21,8 +21,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.Vector;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -31,31 +29,33 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingWorker;
 import javax.swing.event.ListSelectionEvent;
-import javax.swing.tree.DefaultMutableTreeNode;
-import javax.swing.tree.DefaultTreeModel;
 import com.rma.io.FileManagerImpl;
-import hec.client.Report;
+import com.rma.model.Project;
 import hec.util.AnimatedWaitGlassPane;
 import hec2.wat.model.WatSimulation;
 import rma.swing.ButtonCmdPanel;
 import rma.swing.ButtonCmdPanelListener;
 import rma.swing.RmaInsets;
+import rma.swing.RmaJComboBox;
 import rma.swing.RmaJDialog;
 import rma.swing.RmaJTable;
 import rma.swing.RmaJTextField;
-import rma.swing.tree.LabelIconObject;
+import rma.swing.list.RmaListModel;
 import rma.util.IntVector;
+import rma.util.RMAFilenameFilter;
 import rma.util.RMAIO;
 import usbr.wat.plugins.actionpanel.ActionsWindow;
 import usbr.wat.plugins.actionpanel.actions.DisplayReportAction;
 import usbr.wat.plugins.actionpanel.actions.forecast.RunForecastSimulationAction;
 import usbr.wat.plugins.actionpanel.editors.ReportOptionsPanel;
+import usbr.wat.plugins.actionpanel.editors.TemplateWrapper;
 import usbr.wat.plugins.actionpanel.io.ReportOptions;
 import usbr.wat.plugins.actionpanel.model.ForecastReportingPlugin;
 import usbr.wat.plugins.actionpanel.model.ReportPlugin;
@@ -67,9 +67,9 @@ import usbr.wat.plugins.actionpanel.model.forecast.ForecastSimGroup;
 import usbr.wat.plugins.actionpanel.ui.UsbrPanel;
 
 
-import static rma.swing.ButtonCmdPanel.CANCEL_BUTTON;
 import static rma.swing.ButtonCmdPanel.CLOSE_BUTTON;
 import static rma.swing.ButtonCmdPanel.OK_BUTTON;
+import static usbr.wat.plugins.actionpanel.editors.DisplayReportsSelector.REPORTS_DIRS;
 
 public class DisplayForecastReportsSelector extends RmaJDialog
 {
@@ -87,6 +87,7 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 	private List<SimulationReportInfo> _sims;
 	private AnimatedWaitGlassPane _agp;
 	private Component _glassPane;
+	private RmaJComboBox _reportTypeCombo;
 
 	public DisplayForecastReportsSelector(ActionsWindow parent, UsbrPanel parentPanel)
 	{
@@ -191,7 +192,7 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		_optionsPanel = new ReportOptionsPanel();
 		gbc.gridx = GridBagConstraints.RELATIVE;
 		gbc.gridy = GridBagConstraints.RELATIVE;
-		gbc.gridwidth = GridBagConstraints.REMAINDER;
+		gbc.gridwidth = 1;
 		gbc.weightx = 1.0;
 		gbc.weighty = 0.0;
 		gbc.anchor = GridBagConstraints.NORTHWEST;
@@ -200,6 +201,26 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		add(_optionsPanel, gbc);
 
 
+		label = new JLabel("Report Type:");
+		gbc.gridx = GridBagConstraints.RELATIVE;
+		gbc.gridy = GridBagConstraints.RELATIVE;
+		gbc.gridwidth = 1;
+		gbc.weightx = 0.0;
+		gbc.weighty = 0.0;
+		gbc.anchor = GridBagConstraints.WEST;
+		gbc.fill = GridBagConstraints.NONE;
+		gbc.insets = RmaInsets.INSETS0505;
+		add(label, gbc);
+
+		_reportTypeCombo = new RmaJComboBox<>();
+		gbc.gridx = GridBagConstraints.RELATIVE;
+		gbc.gridy = GridBagConstraints.RELATIVE;
+		gbc.gridwidth = GridBagConstraints.REMAINDER;
+		gbc.weightx = 1.0;
+		gbc.anchor = GridBagConstraints.WEST;
+		gbc.fill = GridBagConstraints.HORIZONTAL;
+		gbc.insets = RmaInsets.INSETS0505;
+		add(_reportTypeCombo, gbc);
 
 		_cmdPanel = new ButtonCmdPanel(ButtonCmdPanel.OK_BUTTON| CLOSE_BUTTON);
 		JButton okBtn = _cmdPanel.getButton(OK_BUTTON);
@@ -333,7 +354,6 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 	private void fillForm(List<SimulationReportInfo> sims)
 	{
 		_ensembleTable.deleteCells();
-		List<ReportPlugin> plugins = ReportsManager.getPlugins();
 		boolean canBeComparisionReport = sims.size()>1;
 		ReportPlugin plugin;
 		ForecastSimGroup simGroup = (ForecastSimGroup) _parent.getSimulationGroup();
@@ -364,11 +384,21 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 
 			}
 		}
-
-
+		fillReportTemplateCombo(getForecastReportingPlugin());
 		//updateCreateReportButtonState();
 	}
-
+	public ForecastReportingPlugin getForecastReportingPlugin()
+	{
+		List<ReportPlugin> plugins = ReportsManager.getPlugins();
+		for (int i = 0;i < plugins.size(); i++ )
+		{
+			if ( plugins.get(i) instanceof ForecastReportingPlugin )
+			{
+				return (ForecastReportingPlugin) plugins.get(i);
+			}
+		}
+		return null;
+	}
 	private List<EnsembleReportInfo> getEnsembleInfos()
 	{
 		int rows = _ensembleTable.getNumRows();
@@ -443,6 +473,11 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 				@Override
 				public Void doInBackground()
 				{
+					if ( _reportTypeCombo.getSelectedIndex() > 0 )
+					{
+						TemplateWrapper wrapper = (TemplateWrapper) _reportTypeCombo.getSelectedItem();
+						_sims.get(0).setReportCsvFile(wrapper.getPath());
+					}
 					Future<ReportCreator> future = createReport(fPlugin, _sims.get(0), ensembleInfos);
 
 
@@ -639,6 +674,27 @@ public class DisplayForecastReportsSelector extends RmaJDialog
 		}
 
 
+	}
+	private void fillReportTemplateCombo(ReportPlugin selectedPlugin)
+	{
+
+		if (selectedPlugin == null )
+		{
+			return;
+		}
+		String prjDir = Project.getCurrentProject().getProjectDirectory();
+		String dir = RMAIO.concatPath(prjDir, REPORTS_DIRS);
+		dir = RMAIO.concatPath(dir, RMAIO.userNameToFileName(selectedPlugin.getName()));
+
+		List<String> templates = FileManagerImpl.getFileManager().list(dir, new RMAFilenameFilter("csv", "report CSV files"));
+		if ( templates != null )
+		{
+			List<TemplateWrapper> templatesList = templates.stream().map(e -> new TemplateWrapper(e)).collect(Collectors.toList());
+			Vector<TemplateWrapper> vec = new Vector<>(templatesList);
+			TemplateWrapper emptyWrapper = new TemplateWrapper("");
+			vec.add(0, emptyWrapper);
+			_reportTypeCombo.setModel(new RmaListModel(true,vec ));
+		}
 	}
 
 }
